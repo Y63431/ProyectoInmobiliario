@@ -39,37 +39,41 @@ def procesar_precio(texto_precio, valor_uf_dia):
     if not texto_precio:
         return 0, "N/A"
     
-    # Normalización: Quitamos todo lo que no sea número, punto o coma
-    # Ejemplo: "UF 350.000,00" -> "350.000,00"
-    limpio = re.sub(r'[^\d,.]', '', texto_precio)
+    texto_upper = texto_precio.upper()
     
-    # Truco Chileno:
-    # Si tiene coma, asumimos que es el decimal.
-    # 1. Reemplazamos los puntos de mil por nada (350.000 -> 350000)
-    # 2. Reemplazamos la coma por punto (para que Python entienda decimales)
-    limpio_numerico = limpio.replace('.', '').replace(',', '.')
-    
-    try:
-        valor_float = float(limpio_numerico)
-    except ValueError:
-        return 0, "ErrorFormato"
-
-    # Lógica de detección de moneda
-    es_uf_detectado = "UF" in texto_precio.upper()
-    
-    # REGLA DE SENTIDO COMÚN:
-    # Si el valor es mayor a 5000, CASI SEGURO son pesos, no UF.
-    # (Un arriendo de 5000 UF son 190 millones de pesos mensuales, imposible)
-    if valor_float > 5000:
-        return int(valor_float), "CLP (Corregido)"
+    # --- RAMA 1: DETECTAMOS QUE ES UF ---
+    if "UF" in texto_upper:
+        # Limpieza para formato decimal chileno (10,5)
+        # 1. Quitamos UF y espacios
+        limpio = re.sub(r'[^\d,.]', '', texto_precio)
+        # 2. Reemplazamos puntos de mil por nada y comas por puntos
+        # Ej: "1.200,50" -> "1200.50"
+        limpio_numerico = limpio.replace('.', '').replace(',', '.')
         
-    # Si es un número pequeño (ej: 12.5) y decía UF, entonces sí convertimos
-    if es_uf_detectado:
-        precio_en_pesos = int(valor_float * valor_uf_dia)
-        return precio_en_pesos, "UF"
-    
-    # Caso por defecto: Pesos
-    return int(valor_float), "CLP"
+        try:
+            valor_uf = float(limpio_numerico)
+            
+            # REGLA DE SENTIDO COMÚN (Corrección de falsos UF)
+            # Si alguien puso "UF 350.000", claramente son pesos.
+            # Nadie paga 5000 UF (190 millones) de arriendo.
+            if valor_uf > 5000:
+                return int(valor_uf), "CLP (Corregido)"
+            
+            # Si es un valor normal de UF, convertimos
+            return int(valor_uf * valor_uf_dia), "UF"
+            
+        except ValueError:
+            return 0, "ErrorFormatoUF"
+
+    # --- RAMA 2: ES PESO CHILENO (CLP) ---
+    else:
+        # Esto elimina comas, puntos, signos $ y espacios de un golpe.
+        limpio_numerico = re.sub(r'[^\d]', '', texto_precio)
+        
+        try:
+            return int(limpio_numerico), "CLP"
+        except ValueError:
+            return 0, "ErrorFormatoCLP"
 
 def obtener_ultima_pagina():
     # ... (Tu código de paginación sigue igual) ...
@@ -140,6 +144,7 @@ def ejecutar_scraper():
                 print(f"🔗 Link rescatado: {link_final}")
 
                 if titulo_el and precio_el:
+                    descuento_texto = descuento_el.text.strip() if descuento_el else None
                     reduccion_interna = precio_el.find(class_="d3-ad-tile__price-reduction")
                     if reduccion_interna: reduccion_interna.decompose()
 
@@ -148,8 +153,6 @@ def ejecutar_scraper():
                     
                     # 3. USAMOS LA NUEVA LÓGICA CONVERTIDORA
                     precio_final, moneda_origen = procesar_precio(precio_texto, valor_uf_actual)
-                    
-                    descuento_texto = descuento_el.text.strip() if descuento_el else "No"
 
                     item = {
                         "Titulo": titulo,
